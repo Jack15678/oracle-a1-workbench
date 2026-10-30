@@ -1,0 +1,11 @@
+GSAP 3.15.0
+https://gsap.com/community/standard-license/
+https://registry.npmjs.org/gsap
+License notice retained in JS headers.
+
+Satoshi by Indian Type Foundry / Fontshare
+Official CDN reference only; binary is NOT redistributed in this repository.
+ITF Free Font License v2.0 - 17 Aug 2026.
+https://www.fontshare.com/fonts/satoshi
+https://www.fontshare.com/licenses/itf-ffl
+https://cdn.fontshare.com/wf/D7WD5OXZFWQ5T76HSPWAC7MNKAJXE2YG/LUGNSPO5YC34ABNB2O6K7AFDSOJZT56V/WNDVG7O66ENLOD43GS7FBUCC4KMT5OM2.woff2

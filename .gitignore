@@ -1,0 +1,34 @@
+# Private credentials/configuration
+*.pem
+*.key
+*.pub
+.oci/
+.ssh/
+.env
+.env.*
+config.json
+*.local.json
+Configuration*preview*
+# Runtime files and captures
+.oracle-workbench/
+state.json
+instances.json
+*.jsonl
+*.log
+*.pid
+*.tmp
+screenshots/
+*.png
+*.jpg
+*.jpeg
+*.webp
+# Local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.playwright-cli/
+output/
+.DS_Store
+Thumbs.db

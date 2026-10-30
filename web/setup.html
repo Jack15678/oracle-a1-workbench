@@ -1,0 +1,13 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>准备环境 / A1</title><link rel="stylesheet" href="/style.css"><style>body{max-width:800px;margin:55px auto;padding:0 24px}h1{text-align:left;font-size:30px}h2{margin-top:32px}p,li{color:#aab8bb;font-size:13px}pre{background:#1c2429;border:1px solid #35424a;border-radius:6px;padding:18px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:#c9d6d5}a{color:#eb956f}</style></head><body><a href="/">← 返回工作台</a><h1>准备好环境，再开始轮询。</h1><p>Windows 请先安装 Python 3.10+ 和 WSL / Ubuntu 24.04。管理员 PowerShell 可运行 wsl --install -d Ubuntu-24.04。下面的命令在 Ubuntu 或 Linux 中执行，完成后点击“检查环境”。</p><h2>安装 Oracle 官方 CLI</h2><pre>sudo apt update
+sudo apt install -y python3 python3-venv openssh-client ca-certificates
+python3 -m venv ~/.local/share/oracle-a1/venv
+~/.local/share/oracle-a1/venv/bin/python -m pip install --upgrade oci-cli
+~/.local/share/oracle-a1/venv/bin/oci --version</pre><p>新版执行器使用 Python 标准库解析 JSON，不再需要 jq。安装器来源：<a href="https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm">Oracle 官方 Quickstart</a>。</p><h2>放好 API 配置和 SSH 公钥</h2><pre>mkdir -p ~/.oci ~/.ssh
+chmod 700 ~/.oci ~/.ssh
+# 把自己的 API 私钥复制到 ~/.oci/oci_api_key.pem
+# 把 Configuration file preview.txt 复制为 ~/.oci/config
+# 将 config 中的 key_file 改为实际 Linux 私钥绝对路径
+chmod 600 ~/.oci/oci_api_key.pem ~/.oci/config
+
+# 仅在 ~/.ssh/oracle 尚不存在时生成，避免覆盖已有密钥
+test -f ~/.ssh/oracle || ssh-keygen -t ed25519 -f ~/.ssh/oracle -N ""</pre><p>Windows 下载文件在 WSL 中通常位于 /mnt/c/Users/&lt;Windows用户名&gt;/Downloads/。API 密钥与登录服务器用的 SSH 密钥是两套。</p><h2>代理可选</h2><p>在“OCI 请求代理”中填 WSL 可以访问的 HTTP 代理地址。WSL 的 NAT 模式下，Windows 的 127.0.0.1 通常不能直接使用；先查看 Windows 主机地址，并确认代理允许这条连接。</p><pre>ip route show default</pre><p>“检测出口”会用当前表单里的代理配置，从 WSL 访问 Cloudflare Trace。代理软件按域名分流时，OCI 的实际路由仍取决于相应规则。SSH 放行地址可留空，默认关闭 SSH 入站，抢到后再配置登录。</p><h2>创建后如何核验</h2><p>收到 OCID 表示创建已接受，仍需每 15 秒查询状态，最长 10 分钟。只有查询返回 RUNNING 才显示“已运行”。超时、查询失败或停止时保留编号并显示“状态待核验”，可以点击“刷新实例状态”再次只读查询，不会重新创建。</p><h2>停止和费用边界</h2><p>点击“停止任务”停止本地请求，不会删除已创建资源。已提交的创建请求可能仍在云端完成，已有实例编号时只恢复状态核验；没有编号时先检查已有 A1。不要同时另开 CLI 副本或从控制台并行创建实例。</p><p>工作台使用固定 2 OCPU / 12 GB 上限，并核查 Home Region 全部 compartment 的启动盘和块存储合计不超过 200 GB。这是资源上限检查，不是当月账单核验。保留的旧磁盘也计入容量。</p><p>关闭浏览器不停止后台服务；电脑睡眠会暂停运行。退出服务后不会自动恢复抢机。</p></body></html>

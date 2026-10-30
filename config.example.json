@@ -1,0 +1,16 @@
+{
+  "distro": "Ubuntu-24.04",
+  "compartment": "",
+  "profile": "DEFAULT",
+  "config_file": "~/.oci/config",
+  "ssh_key": "~/.ssh/oracle.pub",
+  "trusted_ip": "",
+  "proxy_url": "",
+  "subnet": "",
+  "name": "oracle-a1",
+  "presets": ["2/12", "1/6", "1/4"],
+  "round_min": 120,
+  "round_max": 300,
+  "max_rounds": 0,
+  "boot_gb": 50
+}
