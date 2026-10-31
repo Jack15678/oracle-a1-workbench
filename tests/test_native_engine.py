@@ -21,6 +21,14 @@ def arguments(*command):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_https_probe_has_roots_without_host_python_certificates(self):
+        import ssl
+        with patch.dict(os.environ, {"SSL_CERT_FILE":"missing-test-ca.pem", "SSL_CERT_DIR":"missing-test-certs"}):
+            context=oracle_grab.tls_context()
+        self.assertGreater(context.cert_store_stats()['x509_ca'],0)
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
     def test_native_command_prefers_sdk_and_retains_cli_fallback(self):
         with patch("oracle_grab.sdk_available", return_value=True), patch("oracle_grab.find_oci") as cli:
             native = oracle_grab.oci_command()

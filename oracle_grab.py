@@ -9,12 +9,13 @@ from pathlib import Path
 import random
 import shutil
 import signal
+import ssl
 import subprocess
 import sys
 import threading
 import time
 from urllib.parse import urlparse
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import HTTPSHandler, ProxyHandler, build_opener
 from runtime import data_directory, write_json, engine_command, process_lock
 
 VERIFY_INTERVAL = 15
@@ -68,9 +69,19 @@ def settings(value):
     return c
 
 
+def tls_context():
+    # Frozen macOS/Linux apps cannot rely on the build machine's OpenSSL paths.
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def egress(c):
     proxy = c["proxy_url"]
-    opener = build_opener(ProxyHandler({"http": proxy, "https": proxy} if proxy else {}))
+    opener = build_opener(ProxyHandler({"http": proxy, "https": proxy} if proxy else {}),
+                         HTTPSHandler(context=tls_context()))
     with opener.open("https://www.cloudflare.com/cdn-cgi/trace", timeout=12) as response:
         data = dict(line.split("=", 1) for line in response.read().decode("utf-8").splitlines() if "=" in line)
     ipaddress.ip_address(data["ip"])

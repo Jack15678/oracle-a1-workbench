@@ -35,6 +35,7 @@ def main():
         assert Path(certifi.where()).is_file()
         import oracle_grab
         import onboarding
+        assert oracle_grab.tls_context().cert_store_stats()["x509_ca"] > 0
         print(json.dumps({"ok": True, "sdk": oci.__version__, "cryptography": cryptography.__version__,
                           "frozen": bool(getattr(sys, "frozen", False))}))
         return
