@@ -1,6 +1,7 @@
-"""A1 creation engine shared by the CLI and local workbench. Stdlib only."""
+"""A1 creation engine shared by the CLI and local workbench."""
 import argparse
 import configparser
+import importlib.util
 import ipaddress
 import json
 import os
@@ -14,7 +15,7 @@ import threading
 import time
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, build_opener
-from runtime import data_directory, write_json
+from runtime import data_directory, write_json, engine_command, process_lock
 
 VERIFY_INTERVAL = 15
 VERIFY_TIMEOUT = 600
@@ -84,9 +85,24 @@ def find_oci():
         if Path(p).expanduser().is_file()), None)
 
 
+def sdk_available():
+    return importlib.util.find_spec("oci") is not None
+
+
+def oci_command():
+    if sdk_available():
+        return engine_command("oci-api")
+    cli = find_oci()
+    return [cli] if cli else []
+
+
 def inspect_environment(c):
     config_path, ssh_path = Path(c["config_file"]).expanduser(), Path(c["ssh_key"]).expanduser()
-    result = dict(python=sys.version.split()[0], oci=find_oci(), config=config_path.is_file(),
+    native = sdk_available()
+    cli = None if native else find_oci()
+    result = dict(python=sys.version.split()[0], oci="OCI Python SDK" if native else cli,
+                  backend="sdk" if native else "cli" if cli else "missing", platform=sys.platform, sdk=native,
+                  bundled=bool(getattr(sys, "frozen", False)), config=config_path.is_file(),
                   api_key=False, ssh_key=False, config_path=str(config_path), ssh_key_path=str(ssh_path))
     if result["config"]:
         try:
@@ -144,7 +160,8 @@ class Engine:
         env = {k: v for k, v in os.environ.items() if k.lower() not in
                ("http_proxy", "https_proxy", "all_proxy", "no_proxy") and not k.startswith("OCI_CLI_")}
         process = subprocess.Popen(self.base + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   text=True, encoding="utf-8", env=env)
+                                   text=True, encoding="utf-8", env=env,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         deadline = min(time.monotonic() + 120, self.verify_deadline or float("inf"))
         while True:
             try:
@@ -181,9 +198,9 @@ class Engine:
         return data
 
     def preflight(self, for_launch=True):
-        cli = find_oci()
-        if not cli:
-            raise ValueError("Ubuntu 中尚未安装 OCI CLI，见 README 中的安装命令")
+        command = oci_command()
+        if not command:
+            raise ValueError("未找到 OCI 运行组件，请使用完整发行包，或安装 requirements.txt 中的依赖")
         config_file = Path(self.c["config_file"]).expanduser()
         config = configparser.ConfigParser(interpolation=None)
         with config_file.open(encoding="utf-8-sig") as file:
@@ -203,7 +220,7 @@ class Engine:
         bootstrap = profile.get("region", "").strip()
         if not bootstrap:
             raise ValueError("OCI 配置缺少 region，无法查询区域订阅")
-        self.base = [cli, "--config-file", str(config_file), "--profile", self.c["profile"], "--region", bootstrap,
+        self.base = command + ["--config-file", str(config_file), "--profile", self.c["profile"], "--region", bootstrap,
                      "--output", "json", "--no-retry", "--connection-timeout", "15", "--read-timeout", "60"]
         if self.c["proxy_url"]:
             self.base += ["--proxy", self.c["proxy_url"]]
@@ -235,7 +252,6 @@ class Engine:
         self.instance_id = instance_id
         self.verify_deadline = time.monotonic() + VERIFY_TIMEOUT
         try:
-            self.receipt(save=True)
             self.event("state", state="verifying", message="正在只读核验实例状态")
             while True:
                 result = self.call("compute", "instance", "get", "--instance-id", instance_id)
@@ -244,7 +260,7 @@ class Engine:
                 self.lifecycle = result["lifecycle-state"]
                 self.receipt(save=True)
                 self.event("verification", instance_id=instance_id, lifecycle=self.lifecycle,
-                           region=self.region, shape=result.get("shape", ""),
+                           region=self.region, tenancy=self.tenancy, shape=result.get("shape", ""),
                            shape_config=result.get("shape-config", {}), name=result.get("display-name", ""),
                            checked_at=time.time())
                 if self.lifecycle == "RUNNING":
@@ -421,7 +437,7 @@ class Engine:
                     self.instance_id, self.lifecycle = result["id"], result.get("lifecycle-state", "")
                     self.receipt(save=True)
                     self.event("result", **request, outcome="accepted", message="创建已接受，正在部署", instance_id=self.instance_id,
-                               lifecycle=self.lifecycle, duration=round(time.monotonic() - started, 2))
+                               tenancy=self.tenancy, lifecycle=self.lifecycle, duration=round(time.monotonic() - started, 2))
                     self.verify(self.instance_id, wait=True)
                     return
                 if self.c["max_rounds"] and self.round >= self.c["max_rounds"]:
@@ -449,8 +465,8 @@ def environment_config():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Oracle A1: run / inspect / egress / verify")
-    parser.add_argument("mode", choices=("run", "worker", "worker-verify", "egress", "inspect", "verify"))
+    parser = argparse.ArgumentParser(description="Oracle A1: run / inspect / egress / auth / verify")
+    parser.add_argument("mode", choices=("run", "worker", "worker-verify", "egress", "inspect", "auth", "verify"))
     parser.add_argument("--config", help="JSON configuration; otherwise use environment variables")
     parser.add_argument("--stdin-config", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--instance-id")
@@ -468,6 +484,15 @@ def main():
         return
     if args.mode == "egress":
         print(json.dumps(egress(c), ensure_ascii=False), flush=True)
+        return
+    if args.mode == "auth":
+        try:
+            engine = Engine(c, lambda event: None)
+            engine.preflight(for_launch=False)
+            print(json.dumps(dict(ok=True, region=engine.region, message="账户已连接，Home Region 已确认"), ensure_ascii=False))
+        except Exception as error:
+            print(str(error), file=sys.stderr)
+            raise SystemExit(1)
         return
     if args.mode in ("verify", "worker-verify") and not (args.instance_id or "").startswith("ocid1.instance."):
         parser.error("verify requires --instance-id ocid1.instance.…")
@@ -491,21 +516,16 @@ def main():
         with log_path.open("a", encoding="utf-8") as file:
             file.write(line + "\n")
         print(line, flush=True)
-    # One worker across the UI and CLI in this Linux user account.
-    import fcntl
-    lock_path = Path.home() / ".cache" / "oracle-a1-grab.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            emit(dict(type="state", at=time.time(), state="error", message="已有 A1 执行器运行，请先停止另一个副本"))
-            raise SystemExit(1)
-        engine = Engine(c, emit, stop, directory / "instances.json")
-        if args.mode in ("verify", "worker-verify"):
-            engine.verify_only(args.instance_id)
-        else:
-            engine.run()
+    try:
+        with process_lock():
+            engine = Engine(c, emit, stop, directory / "instances.json")
+            if args.mode in ("verify", "worker-verify"):
+                engine.verify_only(args.instance_id)
+            else:
+                engine.run()
+    except BlockingIOError:
+        emit(dict(type="state", at=time.time(), state="error", message="已有 A1 执行器运行，请先停止另一个副本"))
+        raise SystemExit(1)
     raise SystemExit({"error": 1, "failed": 1, "exhausted": 3, "unverified": 4, "stopped": 130}.get(last_state[0], 0))
 
 

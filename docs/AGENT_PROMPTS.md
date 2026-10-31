@@ -4,10 +4,11 @@
 
 ```text
 请使用 https://github.com/Jack15678/oracle-a1-workbench ，先阅读 README.md 和 AGENTS.md。
-在独立文件夹获取项目，检查本机 Python、WSL/Ubuntu、OCI CLI。
-通过安全文件帮助我配置自己的 OCI API 凭据和 SSH 公钥，不打印私钥。
+识别本机系统/CPU，优先从 GitHub Releases 获取对应免安装包，校验发布的 SHA-256。
+不要让我另装 Python、WSL 或 OCI CLI；缺少兼容包时先说明，再按 README 使用源码依赖。
+打开首次配置向导，协助我添加 API 公钥并导入匹配的配置预览，不打印私钥。
 配置放系统用户数据目录，不进仓库。代理可选，SSH 入站先关闭。
-运行 inspect 和 egress，报告执行环境的出口 IP、国家、检查时间。
+运行 inspect、只读 auth 和 egress，报告 Home Region、执行环境出口 IP、国家、检查时间。
 启动 localhost:8766 工作台，只有我明确开始后才请求创建实例。
 保留规格上限、可用域遍历、429 退避，不启动并发副本。
 创建返回 OCID 后只读核验，确认 RUNNING 后才说已运行。
@@ -19,12 +20,14 @@
 ```text
 请使用 https://github.com/Jack15678/oracle-a1-workbench ，阅读 README.md 和 AGENTS.md，
 在你自己的持久 Linux 环境运行 Oracle A1 等待任务，不要求我的电脑装软件或保持开机。
-先检查终端、持久存储、依赖安装和持续后台执行能力。
+先检查终端、系统/CPU架构、持久存储、持续后台执行能力。
+优先下载匹配的 GitHub Release 包并核对 SHA-256，使用其中 a1 命令，无需 UI。
+源码路径则创建 Python 虚拟环境，安装 requirements.txt，用 python launcher.py。
 不满足时告诉我具体缺失条件，不声称已开始长期运行。
 告诉我可用的安全文件/secret 提供方式，用它配置 OCI API 凭据和 SSH 公钥。
 不要让我把私钥发到公开聊天，不要把凭据写进仓库。
 
-从 config.example.json 生成私人配置，运行 inspect --config、egress --config。
+从 config.example.json 生成私人配置，运行 inspect --config、auth --config、egress --config。
 开始前报告实际检测的 IP、国家、时间和时区，明确这是你的执行环境出口，
 不是我的电脑 IP，不承诺指定国家或固定 IP。SSH 入站可以先关闭。
 

@@ -1,0 +1,2 @@
+# Official Oracle SDK; Python 3.10+ source use. Releases bundle the runtime.
+oci==2.189.0

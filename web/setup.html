@@ -1,13 +1,54 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>准备环境 / A1</title><link rel="stylesheet" href="/style.css"><style>body{max-width:800px;margin:55px auto;padding:0 24px}h1{text-align:left;font-size:30px}h2{margin-top:32px}p,li{color:#aab8bb;font-size:13px}pre{background:#1c2429;border:1px solid #35424a;border-radius:6px;padding:18px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:#c9d6d5}a{color:#eb956f}</style></head><body><a href="/">← 返回工作台</a><h1>准备好环境，再开始轮询。</h1><p>Windows 请先安装 Python 3.10+ 和 WSL / Ubuntu 24.04。管理员 PowerShell 可运行 wsl --install -d Ubuntu-24.04。下面的命令在 Ubuntu 或 Linux 中执行，完成后点击“检查环境”。</p><h2>安装 Oracle 官方 CLI</h2><pre>sudo apt update
-sudo apt install -y python3 python3-venv openssh-client ca-certificates
-python3 -m venv ~/.local/share/oracle-a1/venv
-~/.local/share/oracle-a1/venv/bin/python -m pip install --upgrade oci-cli
-~/.local/share/oracle-a1/venv/bin/oci --version</pre><p>新版执行器使用 Python 标准库解析 JSON，不再需要 jq。安装器来源：<a href="https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm">Oracle 官方 Quickstart</a>。</p><h2>放好 API 配置和 SSH 公钥</h2><pre>mkdir -p ~/.oci ~/.ssh
-chmod 700 ~/.oci ~/.ssh
-# 把自己的 API 私钥复制到 ~/.oci/oci_api_key.pem
-# 把 Configuration file preview.txt 复制为 ~/.oci/config
-# 将 config 中的 key_file 改为实际 Linux 私钥绝对路径
-chmod 600 ~/.oci/oci_api_key.pem ~/.oci/config
-
-# 仅在 ~/.ssh/oracle 尚不存在时生成，避免覆盖已有密钥
-test -f ~/.ssh/oracle || ssh-keygen -t ed25519 -f ~/.ssh/oracle -N ""</pre><p>Windows 下载文件在 WSL 中通常位于 /mnt/c/Users/&lt;Windows用户名&gt;/Downloads/。API 密钥与登录服务器用的 SSH 密钥是两套。</p><h2>代理可选</h2><p>在“OCI 请求代理”中填 WSL 可以访问的 HTTP 代理地址。WSL 的 NAT 模式下，Windows 的 127.0.0.1 通常不能直接使用；先查看 Windows 主机地址，并确认代理允许这条连接。</p><pre>ip route show default</pre><p>“检测出口”会用当前表单里的代理配置，从 WSL 访问 Cloudflare Trace。代理软件按域名分流时，OCI 的实际路由仍取决于相应规则。SSH 放行地址可留空，默认关闭 SSH 入站，抢到后再配置登录。</p><h2>创建后如何核验</h2><p>收到 OCID 表示创建已接受，仍需每 15 秒查询状态，最长 10 分钟。只有查询返回 RUNNING 才显示“已运行”。超时、查询失败或停止时保留编号并显示“状态待核验”，可以点击“刷新实例状态”再次只读查询，不会重新创建。</p><h2>停止和费用边界</h2><p>点击“停止任务”停止本地请求，不会删除已创建资源。已提交的创建请求可能仍在云端完成，已有实例编号时只恢复状态核验；没有编号时先检查已有 A1。不要同时另开 CLI 副本或从控制台并行创建实例。</p><p>工作台使用固定 2 OCPU / 12 GB 上限，并核查 Home Region 全部 compartment 的启动盘和块存储合计不超过 200 GB。这是资源上限检查，不是当月账单核验。保留的旧磁盘也计入容量。</p><p>关闭浏览器不停止后台服务；电脑睡眠会暂停运行。退出服务后不会自动恢复抢机。</p></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>连接 Oracle / A1 工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23ed774d'/%3E%3Ctext x='6' y='28' font-family='sans-serif' font-size='25' fill='%23131416'%3EA1%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/setup.css">
+</head>
+<body class="setup-page">
+  <header class="setup-header"><a class="brand" href="/" aria-label="返回 A1 工作台"><span class="brand-mark">a<span>1</span></span><span>ORACLE<br><small>LOCAL WORKBENCH</small></span></a><a class="back-link" href="/">返回工作台 ↗</a></header>
+  <main class="setup-main">
+    <div class="setup-intro"><span class="eyebrow">在这台电脑上，准备你的第一台 A1</span><h1>连接账户，然后交给工作台<span>。</span></h1><p>完成一次配置。以后打开应用，就能继续使用。</p></div>
+    <div id="setup-message" class="setup-message" role="status" aria-live="polite">正在检查这台电脑…</div>
+    <div id="runtime-missing" class="runtime-missing" hidden><strong>运行组件尚未就绪</strong><p>直接使用 <a href="https://github.com/Jack15678/oracle-a1-workbench/releases" target="_blank" rel="noopener noreferrer">GitHub Releases 中对应系统的应用包</a>，无需单独安装 Python 或 WSL。源码用户请在项目的 Python 环境执行 <code>python -m pip install -r requirements.txt</code>，然后重新启动工作台。</p></div>
+    <nav class="setup-steps" aria-label="首次配置步骤"><button type="button" data-step="1" aria-current="step"><span>1</span>连接账户</button><button type="button" data-step="2" disabled><span>2</span>选择网络</button><button type="button" data-step="3" disabled><span>3</span>确认就绪</button></nav>
+    <section class="setup-panel" id="step-1" aria-labelledby="account-title">
+      <div class="setup-panel-heading"><h2 id="account-title" tabindex="-1">把 Oracle 账户连接到这台电脑</h2><p>工作台需要一把 API 密钥，代你查询容量和创建实例。</p></div>
+      <div id="existing-account" hidden><div class="connection-summary"><span class="tiny-dot"></span><div><strong>已找到你的账户配置</strong><p>继续使用现有账户、密钥和运行记录。</p></div></div><div class="setup-actions"><button type="button" class="primary" id="keep-account">继续使用此账户 <span>→</span></button><button type="button" class="text-button" id="change-account">重新连接账户</button></div></div>
+      <form id="account-form" autocomplete="off" hidden>
+        <fieldset id="account-fields">
+          <div class="key-options" role="group" aria-label="API 密钥来源"><label><input type="radio" name="key-mode" value="generate" checked><span><strong>生成一把新密钥</strong><small>首次使用，推荐此方式</small></span></label><label><input type="radio" name="key-mode" value="import"><span><strong>我已经有密钥</strong><small>导入本机的 API 私钥文件</small></span></label></div>
+          <div id="generate-key-panel">
+            <div class="instruction"><span class="instruction-number">1</span><div><h3>在本机生成密钥</h3><p>私钥保存在本机；下面只显示需要上传到 Oracle 的公钥。</p><button class="secondary" id="generate-key" type="button">生成 API 公钥</button></div></div>
+            <div class="public-key-area" id="public-key-area" hidden><label for="api-public-key">API 公钥<textarea id="api-public-key" readonly rows="6" spellcheck="false"></textarea></label><div class="key-toolbar"><span id="key-fingerprint"></span><button class="text-button" type="button" id="copy-key">复制公钥</button></div></div>
+            <div class="instruction"><span class="instruction-number">2</span><div><h3>把公钥添加到 Oracle</h3><p>登录 <a href="https://cloud.oracle.com/" target="_blank" rel="noopener noreferrer">Oracle Cloud 控制台 ↗</a>，打开个人资料中的 <strong>API keys</strong> → <strong>Add API key</strong> → <strong>Paste a public key</strong>，粘贴上面的公钥并添加。</p><a class="help-link" href="https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm#How2" target="_blank" rel="noopener noreferrer">找不到入口？查看 Oracle 的图文步骤 ↗</a></div></div>
+          </div>
+          <div id="import-key-panel" hidden><label for="private-key-file">选择已有的 API 私钥文件 <span>.pem 文件</span><input type="file" id="private-key-file" accept=".pem,.key"><small>选择与 Oracle API key 指纹匹配的私钥；它与 SSH 登录密钥不同。文件只发送给这台电脑上的工作台。</small></label></div>
+          <div class="instruction preview-instruction"><span class="instruction-number" id="preview-number">3</span><div><h3>粘贴 Oracle 显示的配置预览</h3><p>复制添加密钥后出现的 <strong>Configuration file preview</strong> 全部内容。路径由工作台自动处理。</p></div></div>
+          <label class="visually-hidden" for="config-preview">Oracle Configuration file preview</label><textarea id="config-preview" rows="7" required spellcheck="false" autocomplete="off" placeholder="[DEFAULT]&#10;user=ocid1.user.…&#10;fingerprint=…&#10;tenancy=ocid1.tenancy.…&#10;region=…&#10;key_file=…"></textarea>
+          <p class="setup-footnote">保存时会同时准备服务器登录所需的 SSH 密钥。SSH 入站默认关闭，可在抢到后设置。</p>
+          <div class="setup-actions"><button type="submit" class="primary" id="save-account">保存到本机并继续 <span>→</span></button></div>
+        </fieldset>
+      </form>
+    </section>
+    <section class="setup-panel" id="step-2" aria-labelledby="network-title" hidden>
+      <div class="setup-panel-heading"><h2 id="network-title" tabindex="-1">选择这台电脑的连接方式</h2><p>能直接访问 Oracle 时，使用直接连接即可。代理是可选项。</p></div>
+      <fieldset id="network-fields"><label for="network-choice">连接方式<select id="network-choice"><option value="direct">直接连接</option><option value="manual">手动填写 HTTP 代理</option></select></label><p class="setup-footnote" id="proxy-detection">正在查找本机代理…</p><label id="manual-proxy-label" for="manual-proxy" hidden>HTTP 代理地址<input id="manual-proxy" type="url" placeholder="http://127.0.0.1:7890" spellcheck="false"><small>使用本机代理软件显示的 HTTP 或 mixed 端口，支持 http:// 和 https:// 地址。</small></label><button type="button" class="secondary" id="check-network">保存并检测出口</button></fieldset>
+      <div class="egress-result" id="setup-egress" hidden><span class="eyebrow">刚刚检测到的出口</span><strong id="setup-egress-ip"></strong><p id="setup-egress-location"></p><small id="setup-egress-time"></small></div>
+      <p class="setup-footnote">这是应用执行环境的出口。代理按域名分流时，Oracle 请求使用的节点还取决于代理规则。</p>
+      <div class="setup-actions"><button type="button" class="primary" id="network-next" disabled>继续核验账户 <span>→</span></button><button type="button" class="text-button" data-back="1">上一步</button></div>
+    </section>
+    <section class="setup-panel" id="step-3" aria-labelledby="confirm-title" hidden>
+      <div class="setup-panel-heading"><h2 id="confirm-title" tabindex="-1">最后，确认账户可以正常访问</h2><p>读取你的区域订阅，自动识别 Home Region。此步骤只查询信息。</p></div>
+      <div class="ready-checks"><div><span>账户配置</span><strong id="summary-account">已保存到本机</strong></div><div><span>网络出口</span><strong id="summary-egress">—</strong></div><div><span>Home Region</span><strong id="summary-region">等待核验</strong></div></div>
+      <button type="button" class="secondary" id="check-account">核验账户与区域</button>
+      <div class="setup-success" id="setup-success" hidden><span class="tiny-dot"></span><div><strong>准备好了。</strong><p>进入工作台后，点击“开始抢机”才会尝试创建资源。</p></div></div>
+      <div class="setup-actions"><button type="button" class="primary" id="finish-setup" disabled>进入工作台 <span>→</span></button><button type="button" class="text-button" data-back="2">上一步</button></div>
+    </section>
+    <footer class="setup-footer"><span>凭据保存在这台电脑的用户数据目录</span><span id="setup-platform">Windows · macOS · Linux</span></footer>
+    <details class="setup-storage"><summary>查看本机保存位置</summary><p id="data-location">正在读取…</p></details>
+  </main>
+  <script src="/vendor/gsap.min.js"></script><script src="/setup.js"></script>
+</body>
+</html>

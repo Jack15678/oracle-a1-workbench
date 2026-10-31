@@ -154,7 +154,6 @@ class VerificationTests(unittest.TestCase):
                 main()
             self.assertEqual(probe.call_args.args[0]['proxy_url'], 'http://127.0.0.1:7890')
 
-    @unittest.skipIf(os.name == 'nt', 'Engine CLI executes in Linux/WSL')
     def test_run_and_verify_cli_use_config_and_persistent_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); path = root / 'config.json'
@@ -164,6 +163,7 @@ class VerificationTests(unittest.TestCase):
                 if mode == 'verify': args += ['--instance-id', 'ocid1.instance.test']
                 with patch.object(sys, 'argv', args), patch('oracle_grab.Engine') as engine, \
                      patch('oracle_grab.data_directory', return_value=root / 'state'), \
+                     patch('runtime.data_directory', return_value=root / 'state'), \
                      patch('oracle_grab.Path.home', return_value=root), patch('oracle_grab.signal.signal'), \
                      self.assertRaises(SystemExit) as result:
                     main()

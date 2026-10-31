@@ -17,6 +17,28 @@ request uses the browser network, independently of the OCI worker proxy.
 Consult upstream terms before downloading, self-hosting or changing its use.
 Exact download sources are also in [web/vendor/SOURCES.txt](web/vendor/SOURCES.txt).
 
-Oracle Cloud Infrastructure CLI is installed separately, not vendored here.
-See [Oracle's repository](https://github.com/oracle/oci-cli) for source/license.
+## Packaged Python runtime and libraries
+
+The source project depends on the official [Oracle Cloud Infrastructure Python
+SDK](https://github.com/oracle/oci-python-sdk), pinned in `requirements.txt`.
+The SDK's Universal Permissive License 1.0 / Apache License 2.0 notices and its
+vendored third-party notices remain applicable. Source installs may still use a
+separately installed OCI CLI as a compatibility fallback; release packages do
+not require or bundle the CLI.
+
+GitHub Releases include CPython (PSF license and its third-party notices), the
+OCI SDK, cryptography/OpenSSL, certificates, and their runtime dependencies.
+Builds collect installed distribution license/notice files into `licenses/`,
+alongside `DEPENDENCIES.json` containing exact versions and upstream metadata.
+Those licenses apply independently of this project's MIT license. SDK transitives
+include cryptography, pyOpenSSL, certifi, python-dateutil, pytz, circuitbreaker,
+urllib3, PyJWT, python-pkcs11, crc32c, aiohttp and their dependencies; the actual
+manifest in each platform package is authoritative for that build.
+
+The [PyInstaller](https://pyinstaller.org/en/stable/license.html) bootloader and
+runtime use GPL-2.0-or-later with the PyInstaller bootloader exception, allowing
+distribution of the bundled application under its own license. Its license and
+exception text are retained in release notices. PyInstaller is a build-time
+tool, not a change to this project's source license.
+
 Oracle and Ampere product names belong to their owners.

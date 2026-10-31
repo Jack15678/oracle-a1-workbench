@@ -15,18 +15,15 @@ from urllib.request import urlopen
 import webbrowser
 
 from oracle_grab import DEFAULTS, settings
-from runtime import data_directory, migrate_state, write_json
+from runtime import data_directory, engine_command, migrate_state, process_lock, write_json
+from onboarding import setup_status, generate_api_key, save_account, detect_proxies, account_tenancy
 
 ROOT = Path(__file__).resolve().parent
 ACTIVE = {"preflight", "running", "waiting", "stopping", "verifying", "provisioning"}
 
 
 def worker_command(c, mode):
-    script = ROOT / "oracle_grab.py"
-    if os.name == "nt":
-        posix = "/mnt/" + script.drive[0].lower() + script.as_posix()[2:]
-        return ["wsl.exe", "-d", c["distro"], "--exec", "python3", "-u", posix, mode]
-    return [sys.executable, "-u", str(script), mode]
+    return engine_command(mode)
 
 
 class Workbench:
@@ -93,8 +90,48 @@ class Workbench:
         with self.lock:
             if self.process is not None and self.process.poll() is None:
                 raise ValueError("请先停止轮询，再修改配置")
-            self.config = settings(value)
+            candidate = settings(value)
+            current = self.state.get("current") or {}
+            changed_account = any(candidate[key] != self.config[key] for key in ("config_file", "profile"))
+            if current.get("instance_id") and changed_account:
+                previous = current.get("tenancy") or account_tenancy(self.config)
+                if not previous or previous != account_tenancy(candidate):
+                    raise ValueError("已有实例记录，不能切换到其他 tenancy；请使用独立数据目录。")
+            self.config = candidate
             self.persist()
+
+    def setup(self):
+        with self.lock:
+            return setup_status(self.config, self.dir)
+
+    def configure_account(self, value):
+        with self.lock:
+            if self.process is not None and self.process.poll() is None:
+                raise ValueError("请先停止任务，再配置账户")
+            previous_tenancy = account_tenancy(self.config)
+            config = save_account(self.dir, self.config, value,
+                                  protect_instance=bool((self.state.get("current") or {}).get("instance_id")))
+            if previous_tenancy != account_tenancy(config):
+                self.state.update(current=None, region="", inventory=None, image=None, state="idle",
+                                  message="新账户已保存，请验证账户与网络", next_at=None)
+            self.save(config)
+            return dict(config=self.config, message="账户配置已保存到本机；请继续检测网络并验证账户。")
+
+    def generate_key(self):
+        with self.lock:
+            if self.process is not None and self.process.poll() is None:
+                raise ValueError("请先停止任务，再配置密钥")
+            return generate_api_key(self.dir)
+
+    def authenticate(self):
+        with self.lock:
+            config = dict(self.config)
+        result = self.inspect(config, "auth")
+        with self.lock:
+            if config != self.config:
+                raise ValueError("配置已变更，请重新验证账户")
+            self.event(dict(type="region", at=time.time(), name=result["region"]))
+        return result
 
     def start(self, value):
         with self.lock:
@@ -159,11 +196,11 @@ class Workbench:
     def inspect(self, value, mode):
         c = settings(value)
         result = subprocess.run(worker_command(c, mode) + ["--stdin-config"], input=json.dumps(c) + "\n", capture_output=True,
-                                text=True, encoding="utf-8", errors="replace", timeout=30,
+                                text=True, encoding="utf-8", errors="replace", timeout=150 if mode == "auth" else 30,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode:
             lines = result.stderr.replace("\x00", "").strip().splitlines()
-            message = lines[-1] if lines else "WSL 检测失败"
+            message = lines[-1] if lines else "执行环境检测失败，请检查依赖或使用完整发行包"
             if mode == "egress":
                 self.event(dict(type="egress_error", at=time.time(), message=message))
             raise ValueError(message)
@@ -197,6 +234,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "Local access only"})
         if self.path == "/api/state":
             return self.reply(200, self.server.app.snapshot())
+        if self.path == "/api/setup":
+            return self.reply(200, self.server.app.setup())
+        if self.path == "/api/proxies":
+            return self.reply(200, detect_proxies())
         path = urlparse(self.path).path
         target = (ROOT / "web" / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
         if not target.is_relative_to((ROOT / "web").resolve()) or not target.is_file():
@@ -214,7 +255,20 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 32768:
                 raise ValueError("请求大小不正确")
             value = json.loads(self.rfile.read(length))
-            if self.path == "/api/save":
+            if not isinstance(value, dict):
+                raise ValueError("请求必须是 JSON 对象")
+            if self.path == "/api/setup/key":
+                return self.reply(200, app.generate_key())
+            elif self.path == "/api/setup/account":
+                return self.reply(200, app.configure_account(value))
+            elif self.path == "/api/setup/auth":
+                return self.reply(200, app.authenticate())
+            elif self.path == "/api/shutdown":
+                app.stop()
+                self.reply(200, {"ok": True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+            elif self.path == "/api/save":
                 app.save(value)
             elif self.path == "/api/start":
                 app.start(value)
@@ -250,17 +304,22 @@ def main():
             except (OSError, ValueError):
                 pass
         raise
-    server.app = Workbench(args.data_dir)
-    url = f"http://127.0.0.1:{server.server_port}"
-    print(f"A1 Workbench: {url}", flush=True)
-    if args.open:
-        webbrowser.open(url)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        with process_lock((args.data_dir or data_directory()) / "workbench.lock"):
+            server.app = Workbench(args.data_dir)
+            url = f"http://127.0.0.1:{server.server_port}"
+            print(f"A1 Workbench: {url}", flush=True)
+            if args.open:
+                webbrowser.open(url + ("/setup.html" if not server.app.setup()["ready"] else "/"))
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                server.app.stop()
+    except BlockingIOError:
+        raise SystemExit("此数据目录已有工作台在运行，请使用已有窗口或指定独立的 --data-dir。") from None
     finally:
-        server.app.stop()
         server.server_close()
 
 
