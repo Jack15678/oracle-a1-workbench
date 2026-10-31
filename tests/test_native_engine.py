@@ -80,6 +80,42 @@ except BlockingIOError:
         self.assertEqual(json.loads(out.getvalue())["region"], "test-region-1")
         self.assertEqual(len(out.getvalue().splitlines()), 1)
 
+    def test_auth_can_prove_existing_instance_access_without_receipt_write(self):
+        instance_id = "ocid1.instance.existing"
+        def preflight(engine, for_launch=True):
+            self.assertFalse(for_launch)
+            engine.region, engine.tenancy = "test-region-1", "ocid1.tenancy.oc1..example"
+        cases = [({"id": instance_id, "lifecycle-state": "RUNNING"}, True),
+                 ({"id": "ocid1.instance.someone-else"}, False),
+                 (oracle_grab.OciError("not authorized", "NotAuthorizedOrNotFound", 404), False)]
+        for response, succeeds in cases:
+            with self.subTest(response=response):
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(sys, "argv", ["oracle_grab.py", "auth", "--instance-id", instance_id]), \
+                        patch("oracle_grab.environment_config", return_value={}), \
+                        patch.object(oracle_grab.Engine, "preflight", preflight), \
+                        patch.object(oracle_grab.Engine, "call", side_effect=response if isinstance(response, Exception) else None,
+                                     return_value=response) as call, \
+                        patch.object(oracle_grab.Engine, "receipt") as receipt, \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    if succeeds:
+                        oracle_grab.main()
+                    else:
+                        with self.assertRaises(SystemExit) as failure:
+                            oracle_grab.main()
+                        self.assertEqual(failure.exception.code, 1)
+                call.assert_called_once_with("compute", "instance", "get", "--instance-id", instance_id)
+                receipt.assert_not_called()
+                if succeeds:
+                    result = json.loads(out.getvalue())
+                    self.assertEqual(result["tenancy"], "ocid1.tenancy.oc1..example")
+                    self.assertEqual(result["instance_id"], instance_id)
+                    self.assertEqual(result["lifecycle"], "RUNNING")
+                    self.assertEqual(len(out.getvalue().splitlines()), 1)
+                else:
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertTrue(err.getvalue().strip())
+
     def test_wrong_account_verify_does_not_create_or_overwrite_receipt(self):
         for saved in (None, {"ocid1.tenancy.oc1..new/test-region-1": {"instance_id": "ocid1.instance.known"}}):
             with self.subTest(saved=saved), tempfile.TemporaryDirectory() as directory:

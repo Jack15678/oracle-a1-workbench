@@ -76,7 +76,7 @@ shasum -a 256 oracle-a1-workbench-0.2.0-macos-arm64.zip
 
 `state.json` 是 UI 状态，`events.jsonl` / `engine-events.jsonl` 是日志，`instances.json` 记忆各账户/区域已接受的实例。**不要删除实例记录来重新抢机。** 日志含实例标识和 IP，分享前脱敏。Windows GUI 启动错误写入 `launcher.log`。`a1 gui --data-dir /path/to/private-ui-state` 只改变 UI 状态位置，执行器记录仍在系统数据目录。
 
-旧 Windows + WSL 用户可继续在 WSL 中使用源码入口和原有 Linux 配置；Windows 原生包需通过向导导入匹配的凭据，WSL 中的 `~/.oci` / `/home/...` 路径不会自动变成 Windows 路径。迁移凭据不等于迁移实例记录；请保留已有 OCID，先只读核验。不要创建第二个副本来测试迁移。
+旧 Windows + WSL 用户可继续在 WSL 中使用源码入口和原有 Linux 配置；Windows 原生包需通过向导导入匹配的凭据，WSL 中的 `~/.oci` / `/home/...` 路径不会自动变成 Windows 路径。若原数据目录已有实例记录，向导会保留 OCID，并只读验证新凭据能访问原实例后才完成账户关联；失败时可重新导入，不会创建另一台。导入 API 密钥不会更换已有实例的 SSH 公钥，登录仍使用原来的 SSH 私钥。不要删除旧记录来测试迁移。
 
 ## 云端 agent 使用
 
@@ -211,6 +211,15 @@ python -m pip install -r requirements-build.txt
 python packaging/build.py --version 0.2.0 --platform linux-x64
 # 其他值：windows-x64 / macos-x64 / macos-arm64 / linux-arm64
 ```
+
+Intel macOS 的 cryptography 需静态链接 OpenSSL，避免与 Python 自带库冲突。该平台安装构建依赖时用下面命令替换普通 `pip install`；需本机已有 OpenSSL、Rust 和 Xcode 命令行工具，GitHub runner 已提供：
+
+```sh
+OPENSSL_STATIC=1 OPENSSL_DIR="$(brew --prefix openssl@3)" \
+  python -m pip install --no-cache-dir --no-binary=cryptography -r requirements-build.txt
+```
+
+这是构建者的要求，下载发行包的用户无需安装这些组件。参考 [cryptography macOS 构建说明](https://cryptography.io/en/latest/installation/#building-cryptography-on-macos)。
 
 构建收集依赖许可证，运行实际发行包的离线干净用户目录检查，然后产生压缩包和 SHA-256。`self-test` 不读取凭据、不连接云端；打包检查验证双入口、SDK/密码学模块、CA 证书、静态资源和 UI 到执行器通信。
 

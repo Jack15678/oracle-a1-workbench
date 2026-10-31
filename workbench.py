@@ -69,6 +69,10 @@ class Workbench:
             self.config = settings(saved["config"])
             self.state.update(saved["state"])
             migrate_state(self.state)
+            current = self.state.get("current") or {}
+            if current.get("instance_id") and not current.get("tenancy"):
+                self.state.update(account_pending_verification=True, state="unverified",
+                                  message="原实例编号已保留，需要验证当前凭据能访问该实例", next_at=None)
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
@@ -97,6 +101,8 @@ class Workbench:
                 self.state["current"] = {**current, **{k: v for k, v in event.items() if k not in ("type", "at")}}
                 if event.get("checked_at"):
                     self.state["current"].pop("error", None)
+                    if event.get("tenancy"):
+                        self.state["account_pending_verification"] = False
                 # Verification does not add a fake creation request to the five-result history.
             elif kind == "region":
                 self.state["region"] = event["name"]
@@ -120,7 +126,7 @@ class Workbench:
             candidate = settings(value)
             current = self.state.get("current") or {}
             changed_account = any(candidate[key] != self.config[key] for key in ("config_file", "profile"))
-            if current.get("instance_id") and changed_account:
+            if current.get("instance_id") and changed_account and not self.state.get("account_pending_verification"):
                 previous = current.get("tenancy") or account_tenancy(self.config)
                 if not previous or previous != account_tenancy(candidate):
                     raise ValueError("已有实例记录，不能切换到其他 tenancy；请使用独立数据目录。")
@@ -129,16 +135,24 @@ class Workbench:
 
     def setup(self):
         with self.lock:
-            return setup_status(self.config, self.dir)
+            result = setup_status(self.config, self.dir)
+            result["account_pending_verification"] = bool(self.state.get("account_pending_verification"))
+            result["ready"] = result["ready"] and not result["account_pending_verification"]
+            return result
 
     def configure_account(self, value):
         with self.lock:
             if self.process is not None and self.process.poll() is None:
                 raise ValueError("请先停止任务，再配置账户")
             previous_tenancy = account_tenancy(self.config)
+            current = self.state.get("current") or {}
+            pending = bool(self.state.get("account_pending_verification"))
             config = save_account(self.dir, self.config, value,
-                                  protect_instance=bool((self.state.get("current") or {}).get("instance_id")))
-            if previous_tenancy != account_tenancy(config):
+                                  protect_instance=bool(current.get("instance_id")) and not pending,
+                                  expected_tenancy=current.get("tenancy"))
+            if current.get("instance_id") and pending:
+                self.state.update(state="unverified", message="原实例编号已保留；需要验证新凭据能访问该实例", next_at=None)
+            elif previous_tenancy != account_tenancy(config):
                 self.state.update(current=None, region="", inventory=None, image=None, state="idle",
                                   message="新账户已保存，请验证账户与网络", next_at=None)
             self.save(config)
@@ -153,10 +167,17 @@ class Workbench:
     def authenticate(self):
         with self.lock:
             config = dict(self.config)
-        result = self.inspect(config, "auth")
+            instance_id = ((self.state.get("current") or {}).get("instance_id")
+                           if self.state.get("account_pending_verification") else None)
+        result = self.inspect(config, "auth", instance_id=instance_id)
         with self.lock:
             if config != self.config:
                 raise ValueError("配置已变更，请重新验证账户")
+            if instance_id:
+                if result.get("instance_id") != instance_id or not result.get("tenancy"):
+                    raise ValueError("尚未确认新凭据可以访问原实例，请使用同一账户的 API 密钥。")
+                self.state["current"]["tenancy"] = result["tenancy"]
+                self.state["account_pending_verification"] = False
             self.event(dict(type="region", at=time.time(), name=result["region"]))
         return result
 
@@ -220,9 +241,12 @@ class Workbench:
                 self.state.update(state="stopping", message="正在停止；已提交的创建请求需核查云端结果", next_at=None)
                 self.persist()
 
-    def inspect(self, value, mode):
+    def inspect(self, value, mode, instance_id=None):
         c = settings(value)
-        result = subprocess.run(worker_command(c, mode) + ["--stdin-config"], input=json.dumps(c) + "\n", capture_output=True,
+        command = worker_command(c, mode) + ["--stdin-config"]
+        if instance_id:
+            command += ["--instance-id", instance_id]
+        result = subprocess.run(command, input=json.dumps(c) + "\n", capture_output=True,
                                 text=True, encoding="utf-8", errors="replace", timeout=150 if mode == "auth" else 30,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode:

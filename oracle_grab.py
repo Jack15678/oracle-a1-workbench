@@ -489,7 +489,15 @@ def main():
         try:
             engine = Engine(c, lambda event: None)
             engine.preflight(for_launch=False)
-            print(json.dumps(dict(ok=True, region=engine.region, message="账户已连接，Home Region 已确认"), ensure_ascii=False))
+            result = dict(ok=True, region=engine.region, tenancy=engine.tenancy, message="账户已连接，Home Region 已确认")
+            if args.instance_id:
+                if not args.instance_id.startswith("ocid1.instance."):
+                    raise ValueError("实例编号必须是 ocid1.instance. 开头的 OCID")
+                instance = engine.call("compute", "instance", "get", "--instance-id", args.instance_id)
+                if instance.get("id") != args.instance_id:
+                    raise OciError("实例查询返回的编号不匹配，未确认账户关联")
+                result.update(instance_id=args.instance_id, lifecycle=instance.get("lifecycle-state", ""))
+            print(json.dumps(result, ensure_ascii=False))
         except Exception as error:
             print(str(error), file=sys.stderr)
             raise SystemExit(1)

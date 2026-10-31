@@ -140,7 +140,7 @@ def account_tenancy(config):
         return ""
 
 
-def save_account(directory, current, value, protect_instance=False):
+def save_account(directory, current, value, protect_instance=False, expected_tenancy=None):
     preview, imported = value.get("config_preview", ""), value.get("private_key", "")
     if not isinstance(preview, str) or not 0 < len(preview) <= 16384:
         raise ValueError("请粘贴 Oracle 控制台的 Configuration file preview")
@@ -161,7 +161,7 @@ def save_account(directory, current, value, protect_instance=False):
     expected = required["fingerprint"].lower()
     if not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){15}", expected):
         raise ValueError("配置预览中的 fingerprint 格式不正确")
-    previous_tenancy = account_tenancy(current)
+    previous_tenancy = expected_tenancy or account_tenancy(current)
     if protect_instance and previous_tenancy != required["tenancy"]:
         raise ValueError("此工作台已有实例记录，请保持原 tenancy。需要使用另一个账户时，请使用独立的数据目录。")
     if imported.strip():

@@ -122,6 +122,30 @@ class OnboardingTests(unittest.TestCase):
                 if first.poll() is None:first.terminate();first.wait(timeout=10)
                 first.stdout.close();first.stderr.close()
 
+    def test_legacy_credentials_can_migrate_only_after_bound_instance_auth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            saved={'config':self.config(root),'state':{'state':'ready','current':{'instance_id':'ocid1.instance.test'}}}
+            (root/'state.json').write_text(json.dumps(saved),encoding='utf-8')
+            app=Workbench(root)
+            self.assertTrue(app.state['account_pending_verification'])
+            public=app.generate_key()
+            app.configure_account({'config_preview':self.preview(public['fingerprint'])})
+            self.assertEqual(app.state['current']['instance_id'],'ocid1.instance.test')
+            self.assertFalse(app.setup()['ready'])
+            with patch.object(app,'inspect',side_effect=ValueError('wrong account')):
+                with self.assertRaises(ValueError):app.authenticate()
+            self.assertTrue(app.state['account_pending_verification'])
+            # A failed import must not lock the user into the wrong account.
+            app.configure_account({'config_preview':self.preview(public['fingerprint'])})
+            result={'ok':True,'region':'us-ashburn-1','tenancy':'ocid1.tenancy.oc1..example','instance_id':'ocid1.instance.test'}
+            with patch.object(app,'inspect',return_value=result) as auth:
+                app.authenticate()
+            self.assertEqual(auth.call_args.kwargs['instance_id'],'ocid1.instance.test')
+            self.assertFalse(app.state['account_pending_verification'])
+            self.assertEqual(app.state['current']['tenancy'],result['tenancy'])
+            with self.assertRaisesRegex(ValueError,'已有实例编号'):app.start(app.config)
+
     def test_proxy_detection_does_not_return_passwords_or_claim_exit(self):
         connection = Mock(); connection.__enter__ = Mock(); connection.__exit__ = Mock()
         with patch('onboarding.getproxies', return_value={'http':'http://user:secret@localhost:8080','https':'http://127.0.0.1:7890'}), \
