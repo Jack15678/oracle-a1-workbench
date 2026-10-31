@@ -9,7 +9,8 @@ import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _ThreadingHTTPServer
+from socketserver import TCPServer
 from urllib.parse import urlparse
 from urllib.request import urlopen
 import webbrowser
@@ -20,6 +21,32 @@ from onboarding import setup_status, generate_api_key, save_account, detect_prox
 
 ROOT = Path(__file__).resolve().parent
 ACTIVE = {"preflight", "running", "waiting", "stopping", "verifying", "provisioning"}
+
+
+class ThreadingHTTPServer(_ThreadingHTTPServer):
+    def server_bind(self):
+        # This application only serves loopback. HTTPServer's reverse-DNS lookup
+        # can stall startup for tens of seconds on otherwise healthy macOS hosts.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
+def connection_error(message, config):
+    text = message.lower()
+    if "proxy" in text or (config["proxy_url"] and any(x in text for x in ("timed out", "refused", "timeout"))):
+        return "无法连接所选代理。请确认代理软件已启动、端口正确，或返回网络步骤选择其他连接方式。"
+    if "notauthenticated" in text or "status': 401" in text:
+        return "Oracle 未接受这份 API 凭据。请确认公钥已添加到当前用户、配置与私钥匹配，并检查系统时间。"
+    if "notauthorized" in text:
+        return "账户无权读取租户或区域信息。请检查配置中的 tenancy、user 以及账户权限。"
+    if "certificate verify failed" in text or "sslerror" in text:
+        return "TLS 证书验证失败。请检查系统时间和代理的 HTTPS 检查设置。"
+    if any(x in text for x in ("getaddrinfo", "nameresolution", "name or service not known")):
+        return "网络无法解析服务地址。请检查网络连接或选择可用的代理后重试。"
+    if any(x in text for x in ("timed out", "timeout", "refused")):
+        return "网络连接失败或超时。请检查当前网络，或返回网络步骤设置代理后重试。"
+    return message
 
 
 def worker_command(c, mode):
@@ -200,7 +227,7 @@ class Workbench:
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode:
             lines = result.stderr.replace("\x00", "").strip().splitlines()
-            message = lines[-1] if lines else "执行环境检测失败，请检查依赖或使用完整发行包"
+            message = connection_error(lines[-1], c) if lines else "执行环境检测失败，请检查依赖或使用完整发行包"
             if mode == "egress":
                 self.event(dict(type="egress_error", at=time.time(), message=message))
             raise ValueError(message)

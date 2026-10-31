@@ -12,10 +12,23 @@ from urllib.request import Request, urlopen
 
 from oracle_grab import DEFAULTS
 from onboarding import generate_api_key, save_account, setup_status, detect_proxies
-from workbench import Workbench, Handler, ThreadingHTTPServer, worker_command
+from workbench import Workbench, Handler, ThreadingHTTPServer, worker_command, connection_error
 
 
 class OnboardingTests(unittest.TestCase):
+    def test_local_server_startup_does_not_depend_on_reverse_dns(self):
+        with patch('socket.getfqdn',side_effect=AssertionError('Unexpected DNS lookup')):
+            server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
+            try:
+                self.assertEqual(server.server_name,'localhost')
+                self.assertGreater(server.server_port,0)
+            finally:server.server_close()
+
+    def test_proxy_failure_explains_the_next_action(self):
+        message=connection_error('Connection to localhost timed out.',{**DEFAULTS,'proxy_url':'http://127.0.0.1:7890'})
+        self.assertIn('确认代理软件已启动',message)
+        self.assertEqual(connection_error('original Oracle error',DEFAULTS),'original Oracle error')
+
     def preview(self, fingerprint):
         return ("[DEFAULT]\nuser=ocid1.user.oc1..example\ntenancy=ocid1.tenancy.oc1..example\n"
                 f"region=us-ashburn-1\nfingerprint={fingerprint}\nkey_file=<ignored preview path>\n")

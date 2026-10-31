@@ -99,7 +99,7 @@ def main():
         with tarfile.open(archive, "w:gz") as output:
             output.add(package, arcname=package.name)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    Path(str(archive) + ".sha256").write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+    Path(str(archive) + ".sha256").write_text(f"{digest}  {archive.name}\n", encoding="utf-8", newline="\n")
     print(archive)
 
 
